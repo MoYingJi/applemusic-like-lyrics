@@ -107,6 +107,13 @@
 
 	overflow-wrap: break-word;
 
+	&.manualLineBreakEnabled {
+		text-wrap: nowrap;
+		word-break: normal;
+		overflow-wrap: normal;
+		white-space: nowrap;
+	}
+
 	& span {
 		display: inline-block;
 		text-align: start;
@@ -164,6 +171,11 @@
 			}
 		}
 	}
+}
+
+.lyricManualLine > span {
+	display: block;
+	white-space: nowrap;
 }
 
 .lyricSubLine {

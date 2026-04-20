@@ -31,6 +31,18 @@ export class LyricLineMouseEvent extends MouseEvent {
 
 export type LyricLineMouseEventListener = (evt: LyricLineMouseEvent) => void;
 
+export interface LyricManualLineBreakConfig {
+	/** 是否启用手动断行，默认启用 */
+	enabled: boolean;
+	/** 允许作为优先断行点的标点集合（在这些字符后优先换行） */
+	punctuations: string;
+}
+
+const DEFAULT_MANUAL_LINE_BREAK_CONFIG: LyricManualLineBreakConfig = {
+	enabled: true,
+	punctuations: ",.;:!?，。；：！？、）】》」』’”)]}>~，。！？；：、…",
+};
+
 /**
  * 歌词播放组件，本框架的核心组件
  *
@@ -38,6 +50,9 @@ export type LyricLineMouseEventListener = (evt: LyricLineMouseEvent) => void;
  */
 export class DomLyricPlayer extends LyricPlayerBase {
 	override currentLyricLineObjects: LyricLineEl[] = [];
+	private manualLineBreakConfig: LyricManualLineBreakConfig = {
+		...DEFAULT_MANUAL_LINE_BREAK_CONFIG,
+	};
 
 	override onResize(): void {
 		const computedStyles = getComputedStyle(this.element);
@@ -93,6 +108,32 @@ export class DomLyricPlayer extends LyricPlayerBase {
 		// 	"--amll-lp-height",
 		// 	`${height.toFixed(4)}px`,
 		// );
+	}
+
+	/**
+	 * 设置手动断行配置（仅对 DomLyricPlayer 生效）
+	 *
+	 * - `enabled=true` 时，歌词主行将使用内部排版算法断行，不依赖浏览器自动换行
+	 * - 优先在空格以及 `punctuations` 中指定的字符后断行
+	 */
+	setManualLineBreakConfig(options: Partial<LyricManualLineBreakConfig>): void {
+		const next: LyricManualLineBreakConfig = {
+			...this.manualLineBreakConfig,
+			...options,
+		};
+		if (
+			next.enabled === this.manualLineBreakConfig.enabled &&
+			next.punctuations === this.manualLineBreakConfig.punctuations
+		) {
+			return;
+		}
+		this.manualLineBreakConfig = next;
+		this.rebuildLyricLines();
+		this.calcLayout(true);
+	}
+
+	getManualLineBreakConfig(): LyricManualLineBreakConfig {
+		return { ...this.manualLineBreakConfig };
 	}
 
 	override setWordFadeWidth(value = 0.5): void {
