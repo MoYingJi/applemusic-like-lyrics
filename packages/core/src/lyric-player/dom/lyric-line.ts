@@ -410,7 +410,7 @@ export class LyricLineEl extends LyricLineBase {
 			const text = this.lyricLine.words
 				.map((w) => this.lyricPlayer.processObsceneWord(w))
 				.join("");
-			this.appendPlainTextTokens(main, text);
+			this.lineBreaker.appendPlainTextTokens(main, text);
 			this.lineBreaker.apply(main);
 			this.setSubLinesText(trans, roman);
 			return;
@@ -437,38 +437,6 @@ export class LyricLineEl extends LyricLineBase {
 	private setSubLinesText(trans: HTMLDivElement, roman: HTMLDivElement) {
 		trans.innerText = this.lyricLine.translatedLyric;
 		roman.innerText = this.lyricLine.romanLyric;
-	}
-
-	private appendPlainTextTokens(main: HTMLDivElement, text: string) {
-		const chunks = text.match(/\s+|\S+/g) ?? [];
-		const punctuations =
-			this.lyricPlayer.getManualLineBreakConfig().punctuations;
-
-		for (const chunk of chunks) {
-			if (chunk.trim().length === 0) {
-				const spaceNode = document.createTextNode(chunk);
-				main.appendChild(spaceNode);
-				this.lineBreaker.pushToken(spaceNode, chunk, 3);
-				continue;
-			}
-
-			let current = "";
-			for (const { segment } of this.segmenter.segment(chunk)) {
-				current += segment;
-				if (punctuations.includes(segment)) {
-					const node = document.createTextNode(current);
-					main.appendChild(node);
-					this.lineBreaker.pushToken(node, current);
-					current = "";
-				}
-			}
-
-			if (current.length > 0) {
-				const node = document.createTextNode(current);
-				main.appendChild(node);
-				this.lineBreaker.pushToken(node, current);
-			}
-		}
 	}
 
 	private getRubyCharCount(word: LyricWord) {

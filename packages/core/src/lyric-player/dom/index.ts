@@ -38,9 +38,11 @@ export interface LyricManualLineBreakConfig {
 	punctuations: string;
 }
 
-const DEFAULT_MANUAL_LINE_BREAK_CONFIG: LyricManualLineBreakConfig = {
-	enabled: true,
-	punctuations: ",.;:!?，。；：！？、）】》」』’”)]}>~，。！？；：、…",
+const getDefaultManualLineBreakConfig: () => LyricManualLineBreakConfig = () => {
+    return {
+        enabled: true,
+        punctuations: ",.;:!?，。；：！？、）】》」』’”)]}>~，。！？；：、…",
+    }
 };
 
 /**
@@ -50,9 +52,7 @@ const DEFAULT_MANUAL_LINE_BREAK_CONFIG: LyricManualLineBreakConfig = {
  */
 export class DomLyricPlayer extends LyricPlayerBase {
 	override currentLyricLineObjects: LyricLineEl[] = [];
-	private manualLineBreakConfig: LyricManualLineBreakConfig = {
-		...DEFAULT_MANUAL_LINE_BREAK_CONFIG,
-	};
+	private manualLineBreakConfig: LyricManualLineBreakConfig = getDefaultManualLineBreakConfig();
 
 	override onResize(): void {
 		const computedStyles = getComputedStyle(this.element);

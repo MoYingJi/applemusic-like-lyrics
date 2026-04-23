@@ -1,5 +1,4 @@
 import styles from "../../styles/lyric-player.module.css";
-import { isCJK } from "../../utils/is-cjk.ts";
 import type { LyricManualLineBreakConfig } from "./index.ts";
 
 /**
@@ -42,6 +41,8 @@ export class ManualLineBreaker {
 	private manualLineContainers: HTMLDivElement[] = [];
 	/** 上次 apply 时的主行内容宽度，用于 maybeReflow 的变化检测 */
 	private lastMainWidth = 0;
+    /** 用于纯文本分段的分词器 */
+    private segmenter = new Intl.Segmenter(undefined, { granularity: "word" });
 
 	constructor(private readonly getConfig: () => LyricManualLineBreakConfig) {}
 
@@ -50,6 +51,50 @@ export class ManualLineBreaker {
 		this.layoutTokens = [];
 		this.lastMainWidth = 0;
 	}
+
+    /**
+     * 将纯文本分段为 token 并追加到布局列表。
+     */
+    appendPlainTextTokens(main: HTMLDivElement, text: string): void {
+        const punctuations = this.getConfig().punctuations;
+
+        let currentToken = "";
+        const flush = (token: string, isWhitespace: boolean = false) => {
+            if (!token.length) return;
+            const node = document.createTextNode(token);
+            main.appendChild(node);
+            if (isWhitespace) {
+                this.pushToken(node, token, 3);
+            } else {
+                this.pushToken(node, token);
+            }
+        };
+
+        for (const { segment } of this.segmenter.segment(text)) {
+            // 空白字符单独成节点，权重 3，并结束当前正在累积的普通 token
+            if (segment.trim().length === 0) {
+                flush(currentToken, false);
+                currentToken = "";
+                flush(segment, true);
+                continue;
+            }
+
+            // 非空白 segment
+            if (punctuations.includes(segment)) {
+                // 标点附着到前一个 token（如果存在），否则单独成 token
+                if (currentToken.length) {
+                    currentToken += segment;
+                } else {
+                    currentToken = segment;
+                }
+            } else {
+                // 普通词：先提交之前的 token，再开始新 token
+                flush(currentToken, false);
+                currentToken = segment;
+            }
+        }
+        flush(currentToken, false);
+    }
 
 	/**
 	 * 向列表末尾追加一个布局 token。
@@ -227,41 +272,6 @@ export class ManualLineBreaker {
 		this.lastMainWidth = maxWidth;
 	}
 
-	/**
-	 * 判断在 index 与 index+1 之间断行是否不会切断 ASCII 单词。
-	 * 若左右两侧均为 ASCII 字母/数字（即位于同一单词内部），则返回 false。
-	 * CJK 字符、标点、空白均视为合法断点。
-	 */
-	private isWordBoundaryBreakIndex(index: number): boolean {
-		// 最后一个 token 之后没有下一行，视为合法
-		if (index >= this.layoutTokens.length - 1) {
-			return true;
-		}
-
-		const leftText = this.layoutTokens[index].text.trimEnd();
-		const rightText = this.layoutTokens[index + 1].text.trimStart();
-		const leftChar = leftText.charAt(leftText.length - 1);
-		const rightChar = rightText.charAt(0);
-
-		// 任意一侧为空（纯空白 token），视为合法
-		if (!leftChar || !rightChar) {
-			return true;
-		}
-
-		// 标点符号本身即为天然断点
-		const punctuations = this.getConfig().punctuations;
-		if (punctuations.includes(leftChar) || punctuations.includes(rightChar)) {
-			return true;
-		}
-
-		// 两侧均为非 CJK（拉丁/数字等），且紧邻 → 位于单词内部，不宜断行
-		if (!isCJK(leftChar) && !isCJK(rightChar)) {
-			return false;
-		}
-
-		return true;
-	}
-
 	/** 获取 HTMLElement 的水平内边距之和（像素） */
 	private getNodeHorizontalPadding(node: Node): number {
 		if (!(node instanceof HTMLElement)) return 0;
@@ -319,14 +329,7 @@ export class ManualLineBreaker {
 	}
 
 	/**
-	 * 在候选断点范围 [start, end] 内，按三级优先策略选出最接近 targetWidth 的断点：
-	 *
-	 * 1. **preferred**：breakPriority ≥ 2（标点/空白后），且当前行不溢出、剩余内容能放入剩余行；
-	 * 2. **segmented**：分词边界安全（不切断 ASCII 单词），且满足上述约束；
-	 * 3. **fallback**：仅保证当前行不溢出，放弃语义优先；
-	 * 4. 若连不溢出的断点都不存在（单个 token 超宽），取 end 强制截断。
-	 *
-	 * 每级候选集内均选 lineWidthOf(j) 最接近 targetWidth 的下标（balanced）。
+	 * 在候选断点范围 [start, end] 内，选出最接近 targetWidth 的断点。
 	 */
 	private chooseBalancedBreakIndex(
 		start: number,
@@ -363,15 +366,11 @@ export class ManualLineBreaker {
 
 		const isValid = (j: number) => noOverflow(j) && remainderCanFit(j);
 
-		// 收集各级候选断点
+		// 收集候选断点
 		const preferred: number[] = [];
-		const segmented: number[] = [];
 		for (let j = start; j <= end; j++) {
 			if (this.layoutTokens[j].breakPriority >= 2) {
 				preferred.push(j);
-			}
-			if (this.isWordBoundaryBreakIndex(j)) {
-				segmented.push(j);
 			}
 		}
 
@@ -390,22 +389,16 @@ export class ManualLineBreaker {
 			return best;
 		};
 
-		// 第一优先级：标点/空白断点
 		const preferredSafe = preferred.filter(isValid);
 		if (preferredSafe.length > 0) {
 			return pick(preferredSafe);
 		}
 
-		// 第二优先级：分词边界断点
-		const segmentedSafe = segmented.filter(isValid);
-		if (segmentedSafe.length > 0) {
-			return pick(segmentedSafe);
-		}
-
-		// 兜底：仅保证当前行不溢出，放弃语义优先，均匀 balanced 分配
+		// 仅保证当前行不溢出，均匀 balanced 分配
 		const allSafe: number[] = [];
 		for (let j = start; j <= end; j++) {
 			if (noOverflow(j)) allSafe.push(j);
+            else break
 		}
 		if (allSafe.length > 0) return pick(allSafe);
 
