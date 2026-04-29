@@ -2,6 +2,7 @@ import type { LyricLine, OptimizeLyricOptions } from "../interfaces.ts";
 
 const DEFAULT_OPTIMIZE_OPTIONS: OptimizeLyricOptions = {
 	normalizeSpaces: true,
+	mergePunctuationSyllables: true,
 	resetLineTimestamps: true,
 	convertExcessiveBackgroundLines: true,
 	syncMainAndBackgroundLines: true,
@@ -16,6 +17,57 @@ function normalizeSpaces(lines: LyricLine[]) {
 	for (const line of lines) {
 		for (const word of line.words) {
 			word.word = word.word.replace(/\s+/g, " ");
+		}
+	}
+}
+
+/**
+ * 将仅由标点符号组成的音节按方向并入前后音节
+ *
+ * 不考虑 `'` 和 `"`
+ */
+function mergePunctuationSyllables(lines: LyricLine[]) {
+	const forwardMergePunctuationOnly = /^[([{<（【「『《〈“‘]+$/u;
+	const backwardMergePunctuationOnly =
+		/^[)\]}>】）,.!?;:，。！？；：、…」』》〉”’]+$/u;
+
+	const mergeToPrevious = (line: LyricLine, index: number) => {
+		if (index <= 0) return false;
+
+		const currentWord = line.words[index];
+		const previousWord = line.words[index - 1];
+		previousWord.word += currentWord.word;
+		previousWord.endTime = Math.max(previousWord.endTime, currentWord.endTime);
+
+		line.words.splice(index, 1);
+		return true;
+	};
+
+	const mergeToNext = (line: LyricLine, index: number) => {
+		const nextWord = line.words[index + 1];
+		if (!nextWord) return false;
+
+		const currentWord = line.words[index];
+		nextWord.word = currentWord.word + nextWord.word;
+		nextWord.startTime = Math.min(nextWord.startTime, currentWord.startTime);
+		line.words.splice(index, 1);
+		return true;
+	};
+
+	for (const line of lines) {
+		for (let i = 0; i < line.words.length; i++) {
+			const currentWord = line.words[i];
+			const normalizedWord = currentWord.word.trim();
+
+			if (forwardMergePunctuationOnly.test(normalizedWord)) {
+				mergeToNext(line, i)
+			} else if (backwardMergePunctuationOnly.test(normalizedWord)) {
+				mergeToPrevious(line, i);
+			} else {
+				continue;
+			}
+
+			i--;
 		}
 	}
 }
@@ -206,6 +258,9 @@ export function optimizeLyricLines(
 
 	if (config.normalizeSpaces) {
 		normalizeSpaces(lines);
+	}
+	if (config.mergePunctuationSyllables) {
+		mergePunctuationSyllables(lines);
 	}
 	if (config.resetLineTimestamps) {
 		resetLineTimestamps(lines);

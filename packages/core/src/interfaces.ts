@@ -76,6 +76,13 @@ export interface OptimizeLyricOptions {
 	 */
 	normalizeSpaces?: boolean;
 	/**
+	 * 合并只有标点符号的音节到上一个音节
+	 *
+	 * 例如将 `hello` + `,` 合并为 `hello,`
+	 * @default true
+	 */
+	mergePunctuationSyllables?: boolean;
+	/**
 	 * 是否将行级时间戳强行设为字级时间戳
 	 * @default true
 	 */
