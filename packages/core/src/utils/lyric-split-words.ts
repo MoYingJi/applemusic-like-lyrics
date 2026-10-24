@@ -1,47 +1,19 @@
 import type { LyricWord } from "../interfaces.ts";
+import { LyricLineBase } from "../lyric-player/base/line.ts";
 import { isCJK } from "./is-cjk.ts";
 
 const SPLIT_WHITESPACE_RE = /(\s+)/;
 const WHITESPACE_RE = /\s/g;
 
 /**
- * 将输入的单词重新分组，之间没有空格的单词将会组合成一个单词数组
- *
- * 例如输入：`["Life", " ", "is", " a", " su", "gar so", "sweet"]`
- *
- * 应该返回：`["Life", " ", "is", " a", [" su", "gar"], "so", "sweet"]`
- * @param words 输入的单词数组
- * @returns 重新分组后的单词数组
+ * 按词语边界组合动画，让同一词内的长音错峰上浮并保留逐字高亮时间
+ * @param words - 带有时间戳的歌词音节
+ * @returns 保留音节边界的词语分组
  */
 export function chunkAndSplitLyricWords(
 	words: LyricWord[],
 ): (LyricWord | LyricWord[])[] {
-	const result: (LyricWord | LyricWord[])[] = [];
-	let currentGroup: LyricWord[] = [];
-
-	const flushGroup = () => {
-		if (currentGroup.length > 0) {
-			result.push(
-				currentGroup.length === 1 ? currentGroup[0] : [...currentGroup],
-			);
-			currentGroup = [];
-		}
-	};
-
-	const processAtom = (atom: LyricWord) => {
-		const isSpace = atom.word.trim().length === 0;
-		const hasRuby = (atom.ruby?.length ?? 0) > 0;
-		const isCJKChar = isCJK(atom.word);
-
-		const isMergeable = !isSpace && !hasRuby && !isCJKChar;
-
-		if (isMergeable) {
-			currentGroup.push(atom);
-		} else {
-			flushGroup();
-			result.push(atom);
-		}
-	};
+	const atoms: LyricWord[] = [];
 
 	for (const w of words) {
 		const content = w.word.trim();
@@ -51,7 +23,7 @@ export function chunkAndSplitLyricWords(
 		const hasRuby = (w.ruby?.length ?? 0) > 0;
 
 		if (isSpace) {
-			processAtom({ ...w, obscene });
+			atoms.push({ ...w, obscene });
 			continue;
 		}
 
@@ -62,7 +34,7 @@ export function chunkAndSplitLyricWords(
 			const trailingSpace = trailingSpaceMatch ? trailingSpaceMatch[0] : "";
 
 			if (leadingSpace) {
-				processAtom({
+				atoms.push({
 					word: leadingSpace,
 					romanWord: "",
 					startTime: w.startTime,
@@ -71,14 +43,14 @@ export function chunkAndSplitLyricWords(
 				});
 			}
 
-			processAtom({
+			atoms.push({
 				...w,
 				word: content,
 				obscene: obscene,
 			});
 
 			if (trailingSpace) {
-				processAtom({
+				atoms.push({
 					word: trailingSpace,
 					romanWord: "",
 					startTime: w.endTime,
@@ -113,7 +85,7 @@ export function chunkAndSplitLyricWords(
 		for (const part of parts) {
 			if (!part.trim()) {
 				const startTime = w.startTime + currentOffset * timePerUnit;
-				processAtom({
+				atoms.push({
 					word: part,
 					romanWord: "",
 					startTime: startTime,
@@ -137,7 +109,7 @@ export function chunkAndSplitLyricWords(
 				const chars = part.split("");
 				for (const char of chars) {
 					const startTime = w.startTime + currentOffset * timePerUnit;
-					processAtom({
+					atoms.push({
 						word: char,
 						romanWord: "",
 						startTime: startTime,
@@ -151,7 +123,7 @@ export function chunkAndSplitLyricWords(
 				const startTime = w.startTime + currentOffset * timePerUnit;
 				const duration = partRealLen * timePerUnit;
 
-				processAtom({
+				atoms.push({
 					word: part,
 					romanWord: partRomanWord,
 					startTime: startTime,
@@ -163,7 +135,40 @@ export function chunkAndSplitLyricWords(
 		}
 	}
 
-	flushGroup();
+	const segmenter = LyricLineBase.wordSegmenter;
+	if (!segmenter) return atoms;
+
+	const result: (LyricWord | LyricWord[])[] = [];
+	const fullText = atoms.map((atom) => atom.word).join("");
+	let atomIndex = 0;
+	let expectedLength = 0;
+	let actualLength = 0;
+	let currentGroup: LyricWord[] = [];
+
+	for (const { segment } of segmenter.segment(fullText)) {
+		expectedLength += segment.length;
+		while (actualLength < expectedLength && atomIndex < atoms.length) {
+			const atom = atoms[atomIndex++];
+			currentGroup.push(atom);
+			actualLength += atom.word.length;
+		}
+
+		// 不拆开带独立时间戳或注音的音节，等分词边界与音节边界重合再分组
+		if (actualLength !== expectedLength) continue;
+
+		while (currentGroup.length > 1 && !currentGroup[0].word.trim()) {
+			const leadingSpace = currentGroup.shift();
+			if (leadingSpace) result.push(leadingSpace);
+		}
+		if (currentGroup.length > 0) {
+			result.push(currentGroup.length === 1 ? currentGroup[0] : currentGroup);
+		}
+		currentGroup = [];
+	}
+
+	if (currentGroup.length > 0) {
+		result.push(currentGroup.length === 1 ? currentGroup[0] : currentGroup);
+	}
 
 	return result;
 }
